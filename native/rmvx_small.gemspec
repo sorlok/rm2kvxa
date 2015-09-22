@@ -4,7 +4,7 @@ Gem::Specification.new do |s|
   s.summary = "Stripped-down RMVX classes."
   s.author  = "Seth N. Hetu"
 
-  s.files = Dir.glob("ext/**/*.{c,rb}")
+  s.files = Dir.glob("ext/**/*.{cpp,rb}")
 
   s.extensions << "ext/rmvx_small/extconf.rb"
 

@@ -291,8 +291,8 @@ resDb.chipsets.each{|chipId,chipPath|
 
     #Give it a proper destination in the output image
     target = [
-      (blockId%4)*64,
-      (blockId/4)*96
+      (blockId%8)*64,
+      (blockId/8)*96
     ]
 
     #We copy all tiles as they "should" be then overlay the central tile.
@@ -331,11 +331,11 @@ module RPG
   class Map
     attr_accessor :width, :height, :tileset_id, :data
 
-    def initialize()
-      @width=20
-      @height=15
+    def initialize(width, height)
+      @width=width
+      @height=height
       @tileset_id=1
-      @data=Table.new #TODO: <Table:0x007f226876d1d0> NOTE: This needs to be a built-in class (copy from mkxp). We can keep this local in whatever directory runs the code.
+      @data=Table.new(width, height, 3) #TODO: <Table:0x007f226876d1d0> NOTE: This needs to be a built-in class (copy from mkxp). We can keep this local in whatever directory runs the code.
 
       @encounter_list=[]
       @encounter_step=30
@@ -376,10 +376,22 @@ prefix = prefix.sub("Map0", "Map") #Is this right?
 outPath = "#{outdir}/#{prefix}.rvdata2"
 puts "Saving: #{outPath}"
 
-temp = RPG::Map.new
-temp.width = resMap.width
-temp.height = resMap.height
+temp = RPG::Map.new(resMap.width, resMap.height)
 temp.tileset_id = resMap.chipsetId
+(0...resMap.width).each{|x|
+  (0...resMap.height).each{|y|
+    srcLowTile = resMap.lowerLayer[y*resMap.width+x]
+    next if srcLowTile<4000 || srcLowTile>=5000 #Water tiles, single tiles (later)
+    srcLowIndex = (srcLowTile-4000)%50
+    srcLowBlock = (srcLowTile-4000)/50
+    srcLowIndex=0 if srcLowIndex==47   #Fix RM2K discrepancies
+    srcLowIndex=0 if srcLowIndex==48
+    srcLowIndex=47 if srcLowIndex==49
+    destLowBlock = 2816 + 48*srcLowBlock
+    destLowLayer = srcLowBlock % 2
+    temp.data[x,y,destLowLayer] = destLowBlock + srcLowIndex
+  }
+}
 temp = Marshal::dump(temp)
 File.open(outPath, "wb") {|file|
   file.write temp
