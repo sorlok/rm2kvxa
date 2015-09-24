@@ -212,6 +212,9 @@ File.open("#{gameFolder}/#{firstMap}","r") {|f|
     end
   end
 
+  puts "width: #{resMap.width}"
+  puts "height: #{resMap.height}"
+
   #Done; print chunk types
   puts "Unknown chunks" unless chunkIDs.empty?
   chunkIDs.each{|k,v|
@@ -427,6 +430,35 @@ resDb.chipsets.each{|chipId,chipPath|
   puts "Saving: #{outPath}"
   dest.save(outPath, :interlace => false)
 
+  #Now write the A5 map (with the remaining tiles)
+  dest = ChunkyPNG::Image.new(256, 512, ChunkyPNG::Color::TRANSPARENT)
+  (0...128).each{|tileId|
+    #Two columns
+    colOffset = 0
+    srcTileId = tileId
+    if tileId>=96
+      colOffset = 1
+      srcTileId -= 96
+    end
+
+    #Get a starting corner (TopLeft)
+    origin = [ 
+      192 + colOffset*96 + (srcTileId%6)*16,
+      0 + (srcTileId/6)*16
+    ]
+
+    #Give it a proper destination in the output image
+    target = [ 
+      32*(tileId%8),
+      32*(tileId/8)
+    ]
+
+    #No need to clone; these are raw tiles
+    copy_cheaty(src, 0, dest, 0, origin, target)
+  }
+  outPath = "#{outdir}/#{prefix}_A5.#{suffix}"
+  puts "Saving: #{outPath}"
+  dest.save(outPath, :interlace => false)
 }
 
 #Mimic RPG Maker's module structure.
@@ -453,7 +485,7 @@ module RPG
       @width=width
       @height=height
       @tileset_id=1
-      @data=Table.new(width, height, 3) #TODO: <Table:0x007f226876d1d0> NOTE: This needs to be a built-in class (copy from mkxp). We can keep this local in whatever directory runs the code.
+      @data=Table.new(width, height, 4)
 
       @encounter_list=[]
       @encounter_step=30
@@ -541,12 +573,14 @@ temp.tileset_id = resMap.chipsetId
     else
       #Non-auto tiles.
       #The last 16 are special (only because of how we abuse A3)
-#TODO: What are we doing wrong regarding shadows? Also, something seems to be wrong about the way some of these tiles are serialized.
-#      if srcLowTile>=128
-#        destLowBlock = 4736 + (srcLowTile-128)*48
-#        temp.data[x,y,0] = destLowBlock
-#      else
-#      end
+      srcLowTile -= 5000
+      if srcLowTile>=128
+        destLowBlock = 4736 + (srcLowTile-128)*48
+        temp.data[x,y,0] = destLowBlock
+      else
+        destLowBlock = 1536 + srcLowTile
+        temp.data[x,y,0] = destLowBlock
+      end
     end
   }
 }
