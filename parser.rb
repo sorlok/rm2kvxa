@@ -259,6 +259,68 @@ def copy_tile(src, srcId, dest, destId, origin, target)
 end
 
 
+#Helper: copy a tile from old-style to new-style
+def copy_water(src, srcId, dest, destId, origin, target, animId)
+  #We need the tile's offset within its block.
+  srcPt = [ animId*16 , srcId*16 ]
+
+  #Are we doing full tiles, or quadrants?
+  if destId.is_a? Array
+    #Give it an offset
+    destId = destId.map{|id| id+= 8}
+  elsif destId==0
+    destId = [0,1,4,5]  #Make it an array
+  elsif destId==1
+    destId = [2,3,6,7]  #Make it an array
+  else
+    raise "Unknown water permutation"
+  end
+
+  #Turn this into a series of destination points:
+  destPts = []
+  destId.each{|pt|
+    destPts.push [(pt%4)*16 + animId*64 , (pt/4)*16]
+  }
+
+  #Now, copy it and magnify it.
+  srcId = 0
+  destPts.each {|pt|
+    for x in (0...8)
+      for y in (0...8)
+        for iX in (0...2) 
+          for iY in (0...2)
+            srcVal = src[origin[0]+srcPt[0]+8*(srcId%2)+x,origin[1]+srcPt[1]+8*(srcId/2)+y]
+            destXY = [target[0]+pt[0]+2*x+iX,target[1]+pt[1]+2*y+iY]
+            dest[destXY[0], destXY[1]] = srcVal
+          end
+        end
+      end
+    end
+    srcId += 1
+  }
+end
+
+#Starting to get a bit redundant.
+def copy_cheaty(src, srcId, dest, destId, origin, target)
+  #We need the tile's offset within its block.
+  destPt = [(destId%2)*32 , (destId/2)*32]
+
+  #Now, copy it and magnify it.
+  for x in (0...16)
+    for y in (0...16)
+      for iX in (0...2) 
+        for iY in (0...2)
+          srcVal = src[origin[0]+x,origin[1]+y]
+          destXY = [target[0]+destPt[0]+2*x+iX,target[1]+destPt[1]+2*y+iY]
+          dest[destXY[0], destXY[1]] = srcVal
+        end
+      end
+    end
+  end
+end
+
+
+
 #Generic output directory
 outdir = 'out'
 FileUtils.rm_rf outdir
@@ -306,6 +368,62 @@ resDb.chipsets.each{|chipId,chipPath|
     copy_tile(src, 7, dest, nil, origin, target)  #Special
   }
   outPath = "#{outdir}/#{prefix}_A2.#{suffix}"
+  puts "Saving: #{outPath}"
+  dest.save(outPath, :interlace => false)
+
+
+  #Now make the _A1 (water tile) map
+  dest = ChunkyPNG::Image.new(512,384, ChunkyPNG::Color::TRANSPARENT)
+  (0..1).each{|waterId|
+    #Get a starting corner (TopLeft)
+    origin = [ 48*waterId, 0 ]   #The grass/snow tile.
+    shared = [ 0, 64 ]           #The shared water tile.
+
+    #Give it a proper destination in the output image
+    target = [ 0, 192*waterId ]
+
+    #We need to copy each animation frame
+    (0...3).each{|animId|
+      #The editor image and "outward" tiles are easy.
+      copy_water(src, 0, dest, 0, origin, target, animId)
+      copy_water(src, 3, dest, 1, origin, target, animId)
+
+      #Now we need to copy sub-quadrants. This is harder, and we can't (easily) cheat like last time.
+      copy_water(src, 0, dest, [0,3,12,15], origin, target, animId)
+      copy_water(src, 2, dest, [2,1,14,13], origin, target, animId)
+      copy_water(src, 1, dest, [8,11,4,7], origin, target, animId)
+
+      #The shared tile is slightly different
+      copy_water(src, 0, dest, [10,9,6,5], shared, target, animId)
+    }
+  }
+  outPath = "#{outdir}/#{prefix}_A1.#{suffix}"
+  puts "Saving: #{outPath}"
+  dest.save(outPath, :interlace => false)
+
+  #We have 15 extra tiles that won't fit in the A5 map, so we jam them into A3, which 
+  # doesn't seem to have a counterpart in RM2K.
+  dest = ChunkyPNG::Image.new(512,256, ChunkyPNG::Color::TRANSPARENT)
+  (0...16).each{|cheatId|
+    #Get a starting corner (TopLeft)
+    #(We'll pull them from the end)
+    origin = [ 
+      288 + ((cheatId+2)%6)*16,
+      80 + ((cheatId+2)/6)*16
+    ]
+
+    #Give it a proper destination in the output image
+    target = [ 
+      64 * (cheatId%8),
+      128 * (cheatId/8)
+    ]
+
+    #We clone it multiple times to make sure it looks sane from above.
+    (0..7).each{|cloneId|
+      copy_cheaty(src, 0, dest, cloneId, origin, target)
+    }
+  }
+  outPath = "#{outdir}/#{prefix}_A3.#{suffix}"
   puts "Saving: #{outPath}"
   dest.save(outPath, :interlace => false)
 
@@ -376,20 +494,60 @@ prefix = prefix.sub("Map0", "Map") #Is this right?
 outPath = "#{outdir}/#{prefix}.rvdata2"
 puts "Saving: #{outPath}"
 
+warnDeepWater = false
 temp = RPG::Map.new(resMap.width, resMap.height)
 temp.tileset_id = resMap.chipsetId
 (0...resMap.width).each{|x|
   (0...resMap.height).each{|y|
     srcLowTile = resMap.lowerLayer[y*resMap.width+x]
-    next if srcLowTile<4000 || srcLowTile>=5000 #Water tiles, single tiles (later)
-    srcLowIndex = (srcLowTile-4000)%50
-    srcLowBlock = (srcLowTile-4000)/50
-    srcLowIndex=0 if srcLowIndex==47   #Fix RM2K discrepancies
-    srcLowIndex=0 if srcLowIndex==48
-    srcLowIndex=47 if srcLowIndex==49
-    destLowBlock = 2816 + 48*srcLowBlock
-    destLowLayer = srcLowBlock % 2
-    temp.data[x,y,destLowLayer] = destLowBlock + srcLowIndex
+
+    if srcLowTile<2000
+      #Shallow water (grass/snow)
+      #Laid out the same regardless of snow-ness.
+      isSnow = false
+      if srcLowTile>=1000
+        srcLowTile -= 1000
+        isSnow = true
+      end
+
+      #Anything above index 50 repeats, but adds some deep-water overlays (which we can't handle for now)
+      srcLowIndex = srcLowTile % 50
+      if srcLowIndex != srcLowTile
+        warnDeepWater = true
+      end
+      next if srcLowIndex==47
+      next if srcLowIndex==48
+      next if srcLowIndex==49
+
+      #Otherwise, water tiles map 1-to-1!
+      destLowBlock = 2048
+      destLowBlock = 2432 if isSnow
+      destLowLayer = 0
+      temp.data[x,y,destLowLayer] = destLowBlock + srcLowIndex
+    elsif srcLowTile<3000
+      #Deep water (TODO)
+    elsif srcLowTile<4000
+      #Waterfalls?
+    elsif srcLowTile<5000
+      #Grass tiles
+      srcLowIndex = (srcLowTile-4000)%50
+      srcLowBlock = (srcLowTile-4000)/50
+      srcLowIndex=0 if srcLowIndex==47   #Fix RM2K discrepancies
+      srcLowIndex=0 if srcLowIndex==48
+      srcLowIndex=47 if srcLowIndex==49
+      destLowBlock = 2816 + 48*srcLowBlock
+      destLowLayer = srcLowBlock % 2
+      temp.data[x,y,destLowLayer] = destLowBlock + srcLowIndex
+    else
+      #Non-auto tiles.
+      #The last 16 are special (only because of how we abuse A3)
+#TODO: What are we doing wrong regarding shadows? Also, something seems to be wrong about the way some of these tiles are serialized.
+#      if srcLowTile>=128
+#        destLowBlock = 4736 + (srcLowTile-128)*48
+#        temp.data[x,y,0] = destLowBlock
+#      else
+#      end
+    end
   }
 }
 temp = Marshal::dump(temp)
@@ -397,9 +555,13 @@ File.open(outPath, "wb") {|file|
   file.write temp
 }
 
+if warnDeepWater
+  puts "WARNING: Deep water doesn't work yet"
+end
 
 
-#TODO: Now, convert/Marshall the maps themselves.
+
+
 
 
 
